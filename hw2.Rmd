@@ -1,0 +1,237 @@
+---
+title: "hw2"
+author: "bowen xia"
+date: "2026-02-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Question1
+
+##Question 1(a)
+```{r}
+bio <- data.frame(
+  x = 0:4,
+  dying = c(2, 8, 15, 23, 27)
+)
+bio$n <- 30
+bio$alive <- bio$n - bio$dying
+bio
+
+fit_logit   <- glm(cbind(dying, alive) ~ x, data=bio, family=binomial(link="logit"))
+fit_probit  <- glm(cbind(dying, alive) ~ x, data=bio, family=binomial(link="probit"))
+fit_cloglog <- glm(cbind(dying, alive) ~ x, data=bio, family=binomial(link="cloglog"))
+
+summary(fit_logit)
+summary(fit_probit)
+summary(fit_cloglog)
+```
+
+```{r}
+wald_ci <- function(est, se, level=0.95){
+  z <- qnorm(0.5 + level/2)
+  c(est - z*se, est + z*se)
+}
+
+tab_q1a <- function(fit, model_name){
+  b  <- coef(fit)["x"]
+  se <- sqrt(vcov(fit)["x","x"])
+  ci <- wald_ci(b, se, 0.95)
+  dev <- deviance(fit)
+  p001 <- predict(fit, newdata=data.frame(x=0.01), type="response")
+  data.frame(
+    Model = model_name,
+    beta_hat = b,
+    CI_low = ci[1],
+    CI_high = ci[2],
+    Deviance = dev,
+    p_hat_x_0.01 = as.numeric(p001)
+  )
+}
+
+q1a_table <- rbind(
+  tab_q1a(fit_logit, "logit"),
+  tab_q1a(fit_probit, "probit"),
+  tab_q1a(fit_cloglog, "c-log-log")
+)
+q1a_table
+```
+
+##Comment for question1(a)
+```{r}
+# Residual deviance and df (goodness-of-fit quick check)
+data.frame(
+  model = c("logit","probit","c-log-log"),
+  deviance = c(deviance(fit_logit), deviance(fit_probit), deviance(fit_cloglog)),
+  df_resid = c(df.residual(fit_logit), df.residual(fit_probit), df.residual(fit_cloglog)),
+  p_value = c(
+    1 - pchisq(deviance(fit_logit),  df.residual(fit_logit)),
+    1 - pchisq(deviance(fit_probit), df.residual(fit_probit)),
+    1 - pchisq(deviance(fit_cloglog),df.residual(fit_cloglog))
+  )
+)
+
+# Plot fitted probabilities vs observed
+bio$obs_p <- bio$dying/bio$n
+bio$fit_logit   <- fitted(fit_logit)
+bio$fit_probit  <- fitted(fit_probit)
+bio$fit_cloglog <- fitted(fit_cloglog)
+
+plot(bio$x, bio$obs_p, pch=19, ylim=c(0,1),
+     xlab="Dose level X", ylab="P(dying)", main="Observed vs fitted")
+lines(bio$x, bio$fit_logit,   lwd=2)
+lines(bio$x, bio$fit_probit,  lwd=2, lty=2)
+lines(bio$x, bio$fit_cloglog, lwd=2, lty=3)
+legend("topleft", bty="n",
+       legend=c("Observed","Logit","Probit","Cloglog"),
+       lty=c(NA,1,2,3), pch=c(19,NA,NA,NA))
+```
+
+##question1(b)
+```{r}
+ld50_delta <- function(fit, link=c("logit","probit","cloglog"), level=0.90){
+  link <- match.arg(link)
+  a <- coef(fit)["(Intercept)"]
+  b <- coef(fit)["x"]
+  V <- vcov(fit)[c("(Intercept)","x"), c("(Intercept)","x")]
+  
+  c0 <- if(link %in% c("logit","probit")) 0 else log(log(2))
+  x50 <- (c0 - a)/b
+  
+  # gradient wrt (a,b)
+  da <- -1/b
+  db <- -(c0 - a)/(b^2)
+  g  <- c(da, db)
+  
+  se_x50 <- sqrt( t(g) %*% V %*% g )
+  z <- qnorm(0.5 + level/2)
+  ci_x50 <- c(x50 - z*se_x50, x50 + z*se_x50)
+  
+  ld50 <- exp(x50)
+  ci_ld50 <- exp(ci_x50)
+  
+  data.frame(
+    model = link,
+    x50 = as.numeric(x50),
+    x50_low = as.numeric(ci_x50[1]),
+    x50_high = as.numeric(ci_x50[2]),
+    LD50 = as.numeric(ld50),
+    LD50_low = as.numeric(ci_ld50[1]),
+    LD50_high = as.numeric(ci_ld50[2])
+  )
+}
+
+q1b <- rbind(
+  ld50_delta(fit_logit, "logit", level=0.90),
+  ld50_delta(fit_probit, "probit", level=0.90),
+  ld50_delta(fit_cloglog, "cloglog", level=0.90)
+)
+q1b
+```
+
+#Question2
+```{r}
+enroll <- data.frame(
+  amount = c(10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90),
+  offers = c(4,6,10,12,39,36,22,14,10,12,8,9,3,1,5,2,1),
+  enrolls= c(0,2,4,2,12,14,10,7,5,5,3,5,2,0,4,2,1)
+)
+enroll$not_enroll <- enroll$offers - enroll$enrolls
+enroll$rate <- enroll$enrolls/enroll$offers
+enroll
+```
+
+```{r}
+fit2 <- glm(cbind(enrolls, not_enroll) ~ amount, data=enroll, family=binomial(link="logit"))
+summary(fit2)
+```
+
+##Question2(a)
+model fit 
+```{r}
+dev <- deviance(fit2)
+dfd <- df.residual(fit2)
+p_dev <- 1 - pchisq(dev, dfd)
+
+pearson <- sum(residuals(fit2, type="pearson")^2)
+p_pear <- 1 - pchisq(pearson, dfd)
+
+data.frame(
+  residual_deviance = dev,
+  df_resid = dfd,
+  p_value_deviance = p_dev,
+  pearson_chisq = pearson,
+  p_value_pearson = p_pear
+)
+```
+
+```{r}
+enroll$fit <- fitted(fit2)
+plot(enroll$amount, enroll$rate, pch=19, ylim=c(0,1),
+     xlab="Scholarship amount (thousand $)", ylab="Yield rate",
+     main="Observed vs fitted yield")
+lines(enroll$amount, enroll$fit, lwd=2)
+```
+
+##Question2(b) Interpret relationship + 95% CI
+
+```{r}
+amount_for_p <- function(fit, p=0.40, level=0.95){
+  a <- coef(fit)["(Intercept)"]
+  b <- coef(fit)["amount"]
+  V <- vcov(fit)[c("(Intercept)","amount"), c("(Intercept)","amount")]
+  
+  c0 <- qlogis(p) # logit(p)
+  xstar <- (c0 - a)/b
+  
+  # delta method
+  da <- -1/b
+  db <- -(c0 - a)/(b^2)
+  g <- c(da, db)
+  se_x <- sqrt( t(g) %*% V %*% g )
+  z <- qnorm(0.5 + level/2)
+  ci <- c(xstar - z*se_x, xstar + z*se_x)
+  
+  data.frame(
+    p_target = p,
+    amount_hat = as.numeric(xstar),
+    amount_low = as.numeric(ci[1]),
+    amount_high = as.numeric(ci[2])
+  )
+}
+
+amount_for_p(fit2, p=0.40, level=0.95)
+
+```
+
+##Question2(c)
+```{r}
+amount_for_p <- function(fit, p=0.40, level=0.95){
+  a <- coef(fit)["(Intercept)"]
+  b <- coef(fit)["amount"]
+  V <- vcov(fit)[c("(Intercept)","amount"), c("(Intercept)","amount")]
+  
+  c0 <- qlogis(p) # logit(p)
+  xstar <- (c0 - a)/b
+  
+  # delta method
+  da <- -1/b
+  db <- -(c0 - a)/(b^2)
+  g <- c(da, db)
+  se_x <- sqrt( t(g) %*% V %*% g )
+  z <- qnorm(0.5 + level/2)
+  ci <- c(xstar - z*se_x, xstar + z*se_x)
+  
+  data.frame(
+    p_target = p,
+    amount_hat = as.numeric(xstar),
+    amount_low = as.numeric(ci[1]),
+    amount_high = as.numeric(ci[2])
+  )
+}
+
+amount_for_p(fit2, p=0.40, level=0.95)
+
+```
