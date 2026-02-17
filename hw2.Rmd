@@ -2,7 +2,7 @@
 title: "hw2"
 author: "bowen xia"
 date: "2026-02-12"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
